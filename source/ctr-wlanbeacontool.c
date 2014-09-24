@@ -2,19 +2,127 @@
 #include <string.h>
 #include <stdio.h>
 #include <pcap/pcap.h>
+#include <openssl/sha.h>
 
 #include "utils.h"
+
+int parse_tag(unsigned char *tag, unsigned int tagsize)
+{
+	int i;
+	unsigned int ouitype=0;
+	unsigned int additionaldatasize;
+	unsigned char hash[0x14];
+	unsigned char cmphash[0x14];
+	unsigned char networkstruct[0x108];
+
+	ouitype = tag[3];
+
+	memset(hash, 0, 0x14);
+	memset(cmphash, 0, 0x14);
+	memset(networkstruct, 0, sizeof(networkstruct));
+
+	printf("OUI(%02x%02x%02x) type 0x%02x:\n", tag[0], tag[1], tag[2], ouitype);
+
+	if(ouitype==0x14)
+	{
+		printf("Data after OUI type:\n");
+		hexdump(&tag[4], tagsize-4);
+		printf("\n");
+	}
+	else if(ouitype==0x15)
+	{
+		if(tagsize<0x34)
+		{
+			printf("Tag size is too small.\n");
+			return 1;
+		}
+
+		memcpy(&networkstruct[0xc], tag, 0x1F);
+		additionaldatasize = tag[0x33];
+		networkstruct[0x3F] = additionaldatasize;
+
+		printf("Network struct:\n");
+		hexdump(networkstruct, 0x108);
+		printf("\n");
+
+		memcpy(cmphash, &tag[0x1F], 0x14);
+		memset(&tag[0x1F], 0, 0x14);
+		SHA1(tag, 0x34 + additionaldatasize, hash);
+		memcpy(&tag[0x1F], cmphash, 0x14);
+
+		printf("Tag data hash: ");
+		for(i=0; i<0x14; i++)printf("%02x", cmphash[i]);
+		if(memcmp(hash, cmphash, 0x14)==0)
+		{
+			printf(" (Valid)\n");
+		}
+		else
+		{
+			printf(" (Invalid)\n");
+		}
+
+		printf("Additional data size: 0x%x.\n", additionaldatasize);
+		if(additionaldatasize)
+		{
+			printf("Data:\n");
+			hexdump(&tag[0x34], additionaldatasize);
+			printf("\n");
+		}
+
+		printf("\n");
+	}
+	else
+	{
+		hexdump(tag, tagsize);
+		printf("\n");
+	}
+
+	return 0;
+}
+
+int parse_beacon(unsigned char *framebuf, unsigned int framesize)
+{
+	int i;
+	unsigned int pos, tmpval;
+
+	printf("Successfully located the beacon.\n");
+	hexdump(framebuf, framesize);
+
+	printf("\n");
+	printf("Host MAC address: ");
+	for(i=0; i<6; i++)
+	{
+		printf("%02x", framebuf[0x0a+i]);
+		if(i<5)printf(":");
+	}
+	printf("\n\n");
+
+	pos = 0x24;
+	while(pos<framesize)
+	{
+		tmpval = framebuf[pos+1] + pos+2;
+		if(tmpval>framesize)break;
+
+		if(framebuf[pos]==0xdd)
+		{
+			parse_tag(&framebuf[pos+2], framebuf[pos+1]);
+		}
+
+		pos = tmpval;
+	}
+
+	return 0;
+}
 
 int main(int argc, char **argv)
 {
 	int ret;
 	int argi;
-	int i;
 	int linktype=0;
 	pcap_t *pcap;
 	struct pcap_pkthdr *pkt_header = NULL;
 	const u_char *pkt_data = NULL;
-	unsigned int framesize = 0, framestart = 0, pos, tmpval;
+	unsigned int framesize = 0, framestart = 0;
 	unsigned char *framebuf = NULL;
 
 	char errbuf[PCAP_ERRBUF_SIZE];
@@ -80,7 +188,7 @@ int main(int argc, char **argv)
 			tmpbuf[1] = 8;
 			if(memcmp(&pkt_data[framestart+0x24], tmpbuf, 0xa)==0)//Check for all-zero 8-byte SSID.
 			{
-				framebuf = (unsigned char*)malloc(framesize);
+				framebuf = (unsigned char*)malloc(0x4000);//This is the size used by 3ds code for NWMUDS:RecvBeaconBroadcastData.
 				if(framebuf==NULL)
 				{
 					printf("Failed to alloc mem for framebuf.\n");
@@ -88,6 +196,7 @@ int main(int argc, char **argv)
 					return 2;
 				}
 
+				memset(framebuf, 0, 0x4000);
 				memcpy(framebuf, &pkt_data[framestart], framesize);
 
 				ret = 0;
@@ -106,33 +215,7 @@ int main(int argc, char **argv)
 
 	if(ret==0 && framesize)
 	{
-		printf("Successfully located the beacon.\n");
-		hexdump(framebuf, framesize);
-
-		printf("\n");
-		printf("Host MAC address: ");
-		for(i=0; i<6; i++)
-		{
-			printf("%02x", framebuf[0x0a+i]);
-			if(i<5)printf(":");
-		}
-		printf("\n\n");
-
-		pos = 0x24;
-		while(pos<framesize)
-		{
-			tmpval = framebuf[pos+1] + pos+2;
-			if(tmpval>framesize)break;
-
-			if(framebuf[pos]==0xdd)
-			{
-				printf("OUI(%02x%02x%02x) type 0x%02x:\n", framebuf[pos+2], framebuf[pos+3], framebuf[pos+4], framebuf[pos+5]);
-				hexdump(&framebuf[pos+2], framebuf[pos+1]);
-				printf("\n");
-			}
-
-			pos = tmpval;
-		}
+		parse_beacon(framebuf, framesize);
 	}
 
 	if(framesize)free(framebuf);
