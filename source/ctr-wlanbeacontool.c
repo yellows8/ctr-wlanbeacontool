@@ -9,11 +9,12 @@ int main(int argc, char **argv)
 {
 	int ret;
 	int argi;
+	int i;
 	int linktype=0;
 	pcap_t *pcap;
 	struct pcap_pkthdr *pkt_header = NULL;
 	const u_char *pkt_data = NULL;
-	unsigned int framesize = 0, framestart = 0;
+	unsigned int framesize = 0, framestart = 0, pos, tmpval;
 	unsigned char *framebuf = NULL;
 
 	char errbuf[PCAP_ERRBUF_SIZE];
@@ -107,6 +108,31 @@ int main(int argc, char **argv)
 	{
 		printf("Successfully located the beacon.\n");
 		hexdump(framebuf, framesize);
+
+		printf("\n");
+		printf("Host MAC address: ");
+		for(i=0; i<6; i++)
+		{
+			printf("%02x", framebuf[0x0a+i]);
+			if(i<5)printf(":");
+		}
+		printf("\n\n");
+
+		pos = 0x24;
+		while(pos<framesize)
+		{
+			tmpval = framebuf[pos+1] + pos+2;
+			if(tmpval>framesize)break;
+
+			if(framebuf[pos]==0xdd)
+			{
+				printf("OUI(%02x%02x%02x) type 0x%02x:\n", framebuf[pos+2], framebuf[pos+3], framebuf[pos+4], framebuf[pos+5]);
+				hexdump(&framebuf[pos+2], framebuf[pos+1]);
+				printf("\n");
+			}
+
+			pos = tmpval;
+		}
 	}
 
 	if(framesize)free(framebuf);
