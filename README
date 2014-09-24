@@ -1,0 +1,4 @@
+This is a tool for parsing and generating 3DS local-WLAN beacons.
+
+types.h and utils.c/.h are from ctrtool.
+
