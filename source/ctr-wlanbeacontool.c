@@ -300,14 +300,18 @@ int main(int argc, char **argv)
 	int ret;
 	int argi;
 	int linktype=0;
+	int snaplen;
+	pcap_dumper_t *pcap_dumper;
 	pcap_t *pcap;
 	struct pcap_pkthdr *pkt_header = NULL;
+	struct pcap_pkthdr pkthdr;
 	const u_char *pkt_data = NULL;
 	unsigned int framesize = 0, framestart = 0;
-	unsigned char *framebuf = NULL;
+	unsigned char *inframebuf = NULL, *outframebuf = NULL;
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 	char inpath[256];
+	char outpath[256];
 	unsigned char tmpbuf[0x20];
 
 	if(argc<2)
@@ -318,16 +322,19 @@ int main(int argc, char **argv)
 		printf("ctr-wlanbeacontool <options>\n");
 		printf("Options:\n");
 		printf("--inpcap=<path> Input pcap to parse. This is used with pcap_open_offline(), therefore the 'path' can be '-' to use stdin for the pcap input.\n");
+		printf("--outpcap=<path> Output pcap to write. This is used with pcap_dump_open(), therefore the 'path' can be '-' to use stdout for the pcap output.\n");
 
 		return 0;
 	}
 
 	memset(errbuf, 0, PCAP_ERRBUF_SIZE);
 	memset(inpath, 0, 256);
+	memset(outpath, 0, 256);
 
 	for(argi=1; argi<argc; argi++)
 	{
 		if(strncmp(argv[argi], "--inpcap=", 9)==0)strncpy(inpath, &argv[argi][9], 255);
+		if(strncmp(argv[argi], "--outpcap=", 10)==0)strncpy(outpath, &argv[argi][10], 255);
 	}
 
 	if(inpath[0]==0)return 0;
@@ -349,6 +356,7 @@ int main(int argc, char **argv)
 	}
 
 	linktype = pcap_datalink(pcap);
+	snaplen = pcap_snapshot(pcap);
 
 	while(1)
 	{
@@ -378,16 +386,23 @@ int main(int argc, char **argv)
 			tmpbuf[1] = 8;
 			if(memcmp(&pkt_data[framestart+0x24], tmpbuf, 0xa)==0)//Check for all-zero 8-byte SSID.
 			{
-				framebuf = (unsigned char*)malloc(0x4000);//This is the size used by 3ds code for NWMUDS:RecvBeaconBroadcastData.
-				if(framebuf==NULL)
+				inframebuf = (unsigned char*)malloc(0x4000);//This is the size used by 3ds code for NWMUDS:RecvBeaconBroadcastData.
+				outframebuf = (unsigned char*)malloc(0x4000);
+				if(inframebuf==NULL || outframebuf==NULL)
 				{
-					printf("Failed to alloc mem for framebuf.\n");
+					printf("Failed to alloc mem for inframebuf/outframebuf.\n");
+					if(inframebuf)free(inframebuf);
+					if(outframebuf)free(outframebuf);
 					pcap_close(pcap);
 					return 2;
 				}
 
-				memset(framebuf, 0, 0x4000);
-				memcpy(framebuf, &pkt_data[framestart], framesize);
+				memcpy(&pkthdr, pkt_header, sizeof(struct pcap_pkthdr));
+
+				memset(inframebuf, 0, 0x4000);
+				memset(outframebuf, 0, 0x4000);
+				memcpy(inframebuf, pkt_data, pkthdr.caplen);
+				memcpy(outframebuf, inframebuf, pkthdr.caplen);
 
 				ret = 0;
 				break;
@@ -403,12 +418,36 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	if(ret==0 && framesize)
+	if(framesize==0)return ret;
+
+	if(ret==0)
 	{
-		ret = parse_beacon(framebuf, framesize);
+		ret = parse_beacon(&inframebuf[framestart], framesize);
 	}
 
-	if(framesize)free(framebuf);
+	if(outpath[0]==0 || ret!=0)
+	{
+		free(inframebuf);
+		return ret;
+	}
+
+	printf("Writing output pcap...\n");
+
+	pcap = pcap_open_dead(linktype, snaplen);
+	pcap_dumper = pcap_dump_open(pcap, outpath);
+	if(pcap_dumper==NULL)
+	{
+		pcap_perror(pcap, "pcap_dump_open() failed: ");
+		pcap_close(pcap);
+		return 1;
+	}
+
+	pcap_dump((u_char*)pcap_dumper, &pkthdr, outframebuf);
+
+	pcap_dump_close(pcap_dumper);
+
+	free(inframebuf);
+	free(outframebuf);
 
 	return ret;
 }
