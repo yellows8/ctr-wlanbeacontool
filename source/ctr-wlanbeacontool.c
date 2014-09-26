@@ -21,6 +21,7 @@ unsigned int tagpos_ouitype14, tagpos_ouitype15, tagpos_ouitype18, tagpos_ouityp
 
 char outpath_oui15[256];
 char inpath_oui15[256];
+char plaindataout_path[256];
 
 //CRC polynomial 0xedb88320
 unsigned int crc32_table[] = {
@@ -228,6 +229,7 @@ int crypt_beacon(unsigned char *framebuf)
 
 int parse_beacon(unsigned char *framebuf, unsigned int framesize)
 {
+	FILE *f;
 	int ret=0;
 	int i;
 	unsigned int pos, tmpval;
@@ -319,6 +321,20 @@ int parse_beacon(unsigned char *framebuf, unsigned int framesize)
 				printf(" (Invalid)\n");
 			}
 			printf("\n");
+
+			if(plaindataout_path[0])
+			{
+				f = fopen(plaindataout_path, "wb");
+				if(f==NULL)
+				{
+					printf("Failed to open output file for decrypted beacon data.\n");
+				}
+				else
+				{
+					fwrite(cryptobuf, 1, cryptobuf_size, f);
+					fclose(f);
+				}
+			}
 		}
 	}
 
@@ -495,6 +511,7 @@ int main(int argc, char **argv)
 		printf("--outpcap=<path> Output pcap to write. This is used with pcap_dump_open(), therefore the 'path' can be '-' to use stdout for the pcap output.\n");
 		printf("--outoui15=<path> Output path to write the data from the OUI-type 0x15 tag data.\n");
 		printf("--inoui15=<path> Input path to read the tag-data from for generating the OUI-type 0x15 tag.\n");
+		printf("--outplain=<path> Output path for the decrypted beacon data.\n");
 
 		return 0;
 	}
@@ -505,6 +522,7 @@ int main(int argc, char **argv)
 	
 	memset(outpath_oui15, 0, 256);
 	memset(inpath_oui15, 0, 256);
+	memset(plaindataout_path, 0, 256);
 
 	for(argi=1; argi<argc; argi++)
 	{
@@ -512,6 +530,7 @@ int main(int argc, char **argv)
 		if(strncmp(argv[argi], "--outpcap=", 10)==0)strncpy(outpath, &argv[argi][10], 255);
 		if(strncmp(argv[argi], "--outoui15=", 11)==0)strncpy(outpath_oui15, &argv[argi][11], 255);
 		if(strncmp(argv[argi], "--inoui15=", 10)==0)strncpy(inpath_oui15, &argv[argi][10], 255);
+		if(strncmp(argv[argi], "--outplain=", 11)==0)strncpy(plaindataout_path, &argv[argi][11], 255);
 	}
 
 	if(inpath[0]==0)return 0;
