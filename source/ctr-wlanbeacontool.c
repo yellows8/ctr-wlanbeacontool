@@ -22,6 +22,7 @@ unsigned int tagpos_ouitype14, tagpos_ouitype15, tagpos_ouitype18, tagpos_ouityp
 char outpath_oui15[256];
 char inpath_oui15[256];
 char plaindataout_path[256];
+char addtag_path[256];
 
 //CRC polynomial 0xedb88320
 unsigned int crc32_table[] = {
@@ -468,6 +469,27 @@ int generate_beacon(unsigned char *inframebuf, unsigned char *framebuf, unsigned
 		}
 	}
 
+	if(addtag_path[0])
+	{
+		f = fopen(addtag_path, "rb");
+		if(f==NULL)
+		{
+			printf("Failed to open input file for the additional tag.\n");
+		}
+		else
+		{
+			memset(tagbuf, 0, 0x100);
+			tagsize = fread(tagbuf, 1, 0x100, f);
+			fclose(f);
+
+			framebuf[pos] = 0xdd;
+			framebuf[pos+1] = tagsize;
+			pos+= 2;
+			memcpy(&framebuf[pos], tagbuf, tagsize);
+			pos+= tagsize;
+		}
+	}
+
 	framesize = pos+4;
 
 	crcval = calc_crc32(framebuf, framesize-4, ~0, ~0);
@@ -512,6 +534,7 @@ int main(int argc, char **argv)
 		printf("--outoui15=<path> Output path to write the data from the OUI-type 0x15 tag data.\n");
 		printf("--inoui15=<path> Input path to read the tag-data from for generating the OUI-type 0x15 tag.\n");
 		printf("--outplain=<path> Output path for the decrypted beacon data.\n");
+		printf("--addtag=<path> Input path to read the tag-data from, for an additional tag with arbitary data. This is located after all of the other tags.\n");
 
 		return 0;
 	}
@@ -523,6 +546,7 @@ int main(int argc, char **argv)
 	memset(outpath_oui15, 0, 256);
 	memset(inpath_oui15, 0, 256);
 	memset(plaindataout_path, 0, 256);
+	memset(addtag_path, 0, 256);
 
 	for(argi=1; argi<argc; argi++)
 	{
@@ -531,6 +555,7 @@ int main(int argc, char **argv)
 		if(strncmp(argv[argi], "--outoui15=", 11)==0)strncpy(outpath_oui15, &argv[argi][11], 255);
 		if(strncmp(argv[argi], "--inoui15=", 10)==0)strncpy(inpath_oui15, &argv[argi][10], 255);
 		if(strncmp(argv[argi], "--outplain=", 11)==0)strncpy(plaindataout_path, &argv[argi][11], 255);
+		if(strncmp(argv[argi], "--addtag=", 9)==0)strncpy(addtag_path, &argv[argi][9], 255);
 	}
 
 	if(inpath[0]==0)return 0;
@@ -541,7 +566,7 @@ int main(int argc, char **argv)
 
 	if(nwmbeacon_keyloaded==0)
 	{
-		printf("Failed to load nwmbeacon_key, crypto will be disabled.\n");
+		printf("Warning: failed to load nwmbeacon_key, crypto will be disabled.\n");
 	}
 
 	cryptobuf = (unsigned char*)malloc(0x4000);
