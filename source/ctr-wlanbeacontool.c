@@ -228,7 +228,7 @@ int crypt_beacon(unsigned char *framebuf)
 	return 0;
 }
 
-int parse_beacon(unsigned char *framebuf, unsigned int framesize)
+int parse_beacon(unsigned char *framebuf, unsigned int framesize, unsigned int has_fcs)
 {
 	FILE *f;
 	int ret=0;
@@ -242,12 +242,17 @@ int parse_beacon(unsigned char *framebuf, unsigned int framesize)
 	hexdump(framebuf, framesize);
 	printf("\n");
 
-	crcval = calc_crc32(framebuf, framesize-4, ~0, ~0);
-	crcvalframe = getle32(&framebuf[framesize-4]);
+	if(has_fcs)
+	{
+		crcval = calc_crc32(framebuf, framesize-4, ~0, ~0);
+		crcvalframe = getle32(&framebuf[framesize-4]);
 
-	printf("FCS: ");
-	if(crcval==crcvalframe)printf("Valid.\n");
-	if(crcval!=crcvalframe)printf("Invalid(calc 0x%08x frame 0x%08x).\n", crcval, crcvalframe);
+		printf("FCS: ");
+		if(crcval==crcvalframe)printf("Valid.\n");
+		if(crcval!=crcvalframe)printf("Invalid(calc 0x%08x frame 0x%08x).\n", crcval, crcvalframe);
+
+		framesize-= 4;
+	}
 
 	printf("\n");
 	printf("Host MAC address: ");
@@ -342,7 +347,7 @@ int parse_beacon(unsigned char *framebuf, unsigned int framesize)
 	return ret;
 }
 
-int generate_beacon(unsigned char *inframebuf, unsigned char *framebuf, unsigned int framestart, unsigned int framesize, struct pcap_pkthdr *pkthdr)
+int generate_beacon(unsigned char *inframebuf, unsigned char *framebuf, unsigned int framestart, unsigned int framesize, struct pcap_pkthdr *pkthdr, unsigned int has_fcs)
 {
 	FILE *f;
 	int ret=0;
@@ -397,6 +402,13 @@ int generate_beacon(unsigned char *inframebuf, unsigned char *framebuf, unsigned
 			memset(tagbuf, 0, 0x100);
 			tagsize = fread(tagbuf, 1, 0x100, f);
 			fclose(f);
+
+			if(tagsize>0xff)
+			{
+				printf("Input tag data for OUI-type 0x15 is too large.\n");
+				return 9;
+			}
+
 			tagptr = tagbuf;
 		}
 	}
@@ -482,6 +494,12 @@ int generate_beacon(unsigned char *inframebuf, unsigned char *framebuf, unsigned
 			tagsize = fread(tagbuf, 1, 0x100, f);
 			fclose(f);
 
+			if(tagsize>0xff)
+			{
+				printf("Input tag data for the additional tag is too large.\n");
+				return 9;
+			}
+
 			framebuf[pos] = 0xdd;
 			framebuf[pos+1] = tagsize;
 			pos+= 2;
@@ -490,10 +508,15 @@ int generate_beacon(unsigned char *inframebuf, unsigned char *framebuf, unsigned
 		}
 	}
 
-	framesize = pos+4;
+	framesize = pos;
 
-	crcval = calc_crc32(framebuf, framesize-4, ~0, ~0);
-	putle32(&framebuf[framesize-4], crcval);
+	if(has_fcs)
+	{
+		framesize+=4;
+
+		crcval = calc_crc32(framebuf, framesize-4, ~0, ~0);
+		putle32(&framebuf[framesize-4], crcval);
+	}
 
 	framesize+= framestart;
 
@@ -516,6 +539,7 @@ int main(int argc, char **argv)
 	const u_char *pkt_data = NULL;
 	unsigned int framesize = 0, framestart = 0;
 	unsigned char *inframebuf = NULL, *outframebuf = NULL;
+	unsigned int has_fcs;
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 	char inpath[256];
@@ -664,7 +688,13 @@ int main(int argc, char **argv)
 
 	if(ret==0)
 	{
-		ret = parse_beacon(&inframebuf[framestart], framesize);
+		has_fcs = 0;
+		if(linktype==DLT_IEEE802_11_RADIO)
+		{
+			if(inframebuf[0x08] & 0x10)has_fcs = 1;
+		}
+
+		ret = parse_beacon(&inframebuf[framestart], framesize, has_fcs);
 	}
 
 	if(outpath[0]==0 || ret!=0)
@@ -677,7 +707,7 @@ int main(int argc, char **argv)
 
 	printf("Writing output pcap...\n");
 
-	ret = generate_beacon(inframebuf, outframebuf, framestart, framesize, &pkthdr);
+	ret = generate_beacon(inframebuf, outframebuf, framestart, framesize, &pkthdr, has_fcs);
 
 	free(inframebuf);
 	free(cryptobuf);
