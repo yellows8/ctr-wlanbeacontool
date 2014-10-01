@@ -18,11 +18,13 @@ unsigned char nwmbeacon_key[0x10];
 unsigned char networkstruct[0x108];
 
 unsigned int tagpos_ouitype14, tagpos_ouitype15, tagpos_ouitype18, tagpos_ouitype19;
+unsigned int addtagex_chunksize = 0, addtagex_stride = 0;
 
 char outpath_oui15[256];
 char inpath_oui15[256];
 char plaindataout_path[256];
 char addtag_path[256];
+char addtagex_path[256];
 
 //CRC polynomial 0xedb88320
 unsigned int crc32_table[] = {
@@ -508,6 +510,35 @@ int generate_beacon(unsigned char *inframebuf, unsigned char *framebuf, unsigned
 		}
 	}
 
+	if(addtagex_path[0])
+	{
+		f = fopen(addtagex_path, "rb");
+		if(f==NULL)
+		{
+			printf("Failed to open input file for the additional tag, with --addtagex.\n");
+		}
+		else
+		{
+			while(1)
+			{
+				memset(tagbuf, 0, 0x100);
+				tagsize = fread(tagbuf, 1, addtagex_chunksize, f);
+				if(tagsize==0)break;
+				if(addtagex_stride)fseek(f, addtagex_stride, SEEK_CUR);
+
+				framebuf[pos] = 0xdd;
+				framebuf[pos+1] = tagsize;
+				pos+= 2;
+				memcpy(&framebuf[pos], tagbuf, tagsize);
+				pos+= tagsize;
+
+				if(tagsize<addtagex_chunksize)break;
+			}
+
+			fclose(f);
+		}
+	}
+
 	framesize = pos;
 
 	if(has_fcs)
@@ -540,6 +571,7 @@ int main(int argc, char **argv)
 	unsigned int framesize = 0, framestart = 0;
 	unsigned char *inframebuf = NULL, *outframebuf = NULL;
 	unsigned int has_fcs;
+	char *strptr;
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 	char inpath[256];
@@ -559,9 +591,12 @@ int main(int argc, char **argv)
 		printf("--inoui15=<path> Input path to read the tag-data from for generating the OUI-type 0x15 tag.\n");
 		printf("--outplain=<path> Output path for the decrypted beacon data.\n");
 		printf("--addtag=<path> Input path to read the tag-data from, for an additional tag with arbitary data. This is located after all of the other tags.\n");
+		printf("--addtagex=<hex chunksize>,<hex stride>,<path> Input path to read the tag-data from, for an additional tag with arbitary data. This is located after all of the other tags, after the data from --addtag if any. This will write the input file into tag(s), where the max tag-size is the chunksize. After reading each chunk from the file, fseek will be used with the stride value when non-zero.\n");
 
 		return 0;
 	}
+
+	addtagex_chunksize = 0;
 
 	memset(errbuf, 0, PCAP_ERRBUF_SIZE);
 	memset(inpath, 0, 256);
@@ -571,6 +606,7 @@ int main(int argc, char **argv)
 	memset(inpath_oui15, 0, 256);
 	memset(plaindataout_path, 0, 256);
 	memset(addtag_path, 0, 256);
+	memset(addtagex_path, 0, 256);
 
 	for(argi=1; argi<argc; argi++)
 	{
@@ -580,6 +616,30 @@ int main(int argc, char **argv)
 		if(strncmp(argv[argi], "--inoui15=", 10)==0)strncpy(inpath_oui15, &argv[argi][10], 255);
 		if(strncmp(argv[argi], "--outplain=", 11)==0)strncpy(plaindataout_path, &argv[argi][11], 255);
 		if(strncmp(argv[argi], "--addtag=", 9)==0)strncpy(addtag_path, &argv[argi][9], 255);
+		if(strncmp(argv[argi], "--addtagex=", 11)==0)
+		{
+			sscanf(&argv[argi][11], "0x%x", &addtagex_chunksize);
+
+			if(addtagex_chunksize>0xff)
+			{
+				printf("Invalid --addtagex input.\n");
+				return 1;
+			}
+
+			strptr = strchr(&argv[argi][11], ',');
+			if(strptr)
+			{
+				sscanf(&strptr[1], "0x%x", &addtagex_stride);
+				strptr = strchr(&strptr[1], ',');
+				if(strptr)strncpy(addtagex_path, &strptr[1], 255);
+			}
+
+			if(strptr==NULL)
+			{
+				printf("Invalid --addtagex input.\n");
+				return 1;
+			}
+		}
 	}
 
 	if(inpath[0]==0)return 0;
