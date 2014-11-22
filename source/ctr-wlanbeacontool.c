@@ -22,6 +22,7 @@ unsigned int addtagex_chunksize = 0, addtagex_stride = 0;
 
 char outpath_oui15[256];
 char inpath_oui15[256];
+char inpath_additonaldata[256];
 char plaindataout_path[256];
 char addtag_path[256];
 char addtagex_path[256];
@@ -392,6 +393,10 @@ int generate_beacon(unsigned char *inframebuf, unsigned char *framebuf, unsigned
 	tagsize = inframebuf[tagpos_ouitype15+1];
 	tagptr = &inframebuf[tagpos_ouitype15+2];
 
+	memset(tagbuf, 0, 0x100);
+	memcpy(tagbuf, tagptr, tagsize);
+	tagptr = tagbuf;
+
 	if(inpath_oui15[0])
 	{
 		f = fopen(inpath_oui15, "rb");
@@ -410,8 +415,23 @@ int generate_beacon(unsigned char *inframebuf, unsigned char *framebuf, unsigned
 				printf("Input tag data for OUI-type 0x15 is too large.\n");
 				return 9;
 			}
+		}
+	}
 
-			tagptr = tagbuf;
+	if(inpath_additonaldata[0])
+	{
+		f = fopen(inpath_additonaldata, "rb");
+		if(f==NULL)
+		{
+			printf("Failed to open input file for the additonal-data section.\n");
+		}
+		else
+		{
+			memset(&tagbuf[0x34], 0, 0xc8);
+			size = fread(&tagbuf[0x34], 1, 0xc8, f);
+			fclose(f);
+
+			tagbuf[0x33] = size;
 		}
 	}
 
@@ -589,6 +609,7 @@ int main(int argc, char **argv)
 		printf("--outpcap=<path> Output pcap to write. This is used with pcap_dump_open(), therefore the 'path' can be '-' to use stdout for the pcap output.\n");
 		printf("--outoui15=<path> Output path to write the data from the OUI-type 0x15 tag data.\n");
 		printf("--inoui15=<path> Input path to read the tag-data from for generating the OUI-type 0x15 tag.\n");
+		printf("--inadditonaldata=<path> Input path to read the additional-data section from, for generating the OUI-type 0x15 tag(handled after --inoui15).");
 		printf("--outplain=<path> Output path for the decrypted beacon data.\n");
 		printf("--addtag=<path> Input path to read the tag-data from, for an additional tag with arbitary data. This is located after all of the other tags.\n");
 		printf("--addtagex=<hex chunksize>,<hex stride>,<path> Input path to read the tag-data from, for an additional tag with arbitary data. This is located after all of the other tags, after the data from --addtag if any. This will write the input file into tag(s), where the max tag-size is the chunksize. After reading each chunk from the file, fseek will be used with the stride value when non-zero.\n");
@@ -604,6 +625,7 @@ int main(int argc, char **argv)
 	
 	memset(outpath_oui15, 0, 256);
 	memset(inpath_oui15, 0, 256);
+	memset(inpath_additonaldata, 0, 256);
 	memset(plaindataout_path, 0, 256);
 	memset(addtag_path, 0, 256);
 	memset(addtagex_path, 0, 256);
@@ -614,6 +636,7 @@ int main(int argc, char **argv)
 		if(strncmp(argv[argi], "--outpcap=", 10)==0)strncpy(outpath, &argv[argi][10], 255);
 		if(strncmp(argv[argi], "--outoui15=", 11)==0)strncpy(outpath_oui15, &argv[argi][11], 255);
 		if(strncmp(argv[argi], "--inoui15=", 10)==0)strncpy(inpath_oui15, &argv[argi][10], 255);
+		if(strncmp(argv[argi], "--inadditonaldata=", 18)==0)strncpy(inpath_additonaldata, &argv[argi][18], 255);
 		if(strncmp(argv[argi], "--outplain=", 11)==0)strncpy(plaindataout_path, &argv[argi][11], 255);
 		if(strncmp(argv[argi], "--addtag=", 9)==0)strncpy(addtag_path, &argv[argi][9], 255);
 		if(strncmp(argv[argi], "--addtagex=", 11)==0)
